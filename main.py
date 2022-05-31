@@ -18,22 +18,24 @@ import matplotlib.colors as pltcolors
 from sklearn import linear_model, svm, discriminant_analysis, metrics
 from scipy import optimize
 
+from tensorflow import keras
+from mySVM import SupportVectorMachine
           
 
 
 
-def extract_feature(file_name, **kwargs):
+def extractFeature(file_name, **kwargs):
     mfcc = kwargs.get("mfcc")
     mfcc2 = kwargs.get("mfcc2")
 
     with soundfile.SoundFile(file_name) as sound_file:
         X = sound_file.read(dtype="float32")
         sample_rate = sound_file.samplerate
+        # print("sample rate = ", sample_rate)
         result = np.array([])
         if mfcc:
             mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=40).T, axis=0)
             result = np.hstack((result, mfccs))
-            # print(result)
         
         if mfcc2:
             from mfccFinal import MFCC
@@ -43,8 +45,9 @@ def extract_feature(file_name, **kwargs):
     return result
 
 
-
-int2emotion = {
+def dataLoader(emotionType, test_size=0.01):
+    X, y = [], []
+    int2emotion = {
     "01": "neutral",
     "02": "calm",
     "03": "happy",
@@ -53,102 +56,98 @@ int2emotion = {
     "06": "fearful",
     "07": "disgust",
     "08": "surprised"
-}
+    }
 
-# we allow only these emotions ( feel free to tune this on your need )
-AVAILABLE_EMOTIONS = {
-    "angry",
-    "sad",
-    "neutral",
-    "happy"
-}
-
-def load_data(test_size=0.2):
-    X, y = [], []
-    counter = 0
+    AVAILABLE_EMOTIONS = {
+        "angry": 147,
+        "sad": 131,
+        "happy": 151
+    }
+    
+    emotionCounter = 0
+    otherCounter = 0
     for file in glob.glob("data/Actor_*/*.wav"):
-        # get the base name of the audio file
+
         basename = os.path.basename(file)
-        # print(basename)
-        # get the emotion label
         emotion = int2emotion[basename.split("-")[2]]
-        # we allow only AVAILABLE_EMOTIONS we set
+
         if emotion not in AVAILABLE_EMOTIONS:
             continue
-        # extract speech features
-        features = extract_feature(file, mfcc2=True)
-        # add to data
-        X.append(features)
-        y.append(emotion)
-        counter += 1 
-        if counter == 100:
-            break
-    # split the data to training and testing and return it
+
+        if emotionCounter < AVAILABLE_EMOTIONS[emotionType] and emotion == emotionType:
+            features = extractFeature(file, mfcc2=True)
+            X.append(features)
+            y.append(1.0)
+            emotionCounter += 1
+        if otherCounter < AVAILABLE_EMOTIONS[emotionType] and emotion != emotionType:
+            features = extractFeature(file, mfcc2=True)
+            X.append(features)
+            y.append(-1.0)
+            otherCounter += 1
+            
+
     return train_test_split(np.array(X), y, test_size=test_size, random_state=7)
 
-
-X_train, X_test, y_train, y_test = load_data(test_size=0.25)
-# X_train2, X_test2, y_train2, y_test2 = load_data2(test_size=0.25)
-
-y_train_new = [] 
+X_train, X_test, y_train, y_test = dataLoader("happy", test_size=0.01)
+y_train_new = []
 y_test_new = []
-
-for i in y_train:
-    if i == "happy":
-        y_train_new.append(1.0)
-    else:
-        y_train_new.append(-1.0)
-
-        
-for i in y_test:
-    if i == "happy":
-        y_test_new.append(1.0)
-    else:
-        y_test_new.append(-1.0)
-        
 
 X_train = np.array(X_train)
 X_test = np.array(X_test)
 
-# X_train2 = np.array(X_train2)
-# X_test2 = np.array(X_test2)
-y_train_new = np.array(y_train_new) 
-# print(y_train_new)
-y_test_new = np.array(y_test_new)
+y_train_new = np.array(y_train) 
+y_test_new = np.array(y_test)
+
+def kernel(x, y, sigma=1):
+    if np.ndim(x) == 1 and np.ndim(y) == 1:
+        return np.exp(-np.power(np.linalg.norm(x-y),2)/2*sigma**2)
+    elif np.ndim(x) > 1 and np.ndim(y) > 1:
+      result = []
+      temp = []
+      for i in range(len(x)):
+        for j in range(len(y)):
+          diff = x[i]-y[j]
+          temp_result = np.exp(-np.power(np.linalg.norm(diff),2)/2*sigma**2)
+          temp.append(temp_result)
+        result.append(temp)
+        temp = []
+      return np.array(result)
+    else:
+        return np.exp(- (np.linalg.norm(x - y, 2, axis=1) ** 2) / (2 * sigma ** 2))
+
+if __name__ == "__main__":
+    from recordVoice import record
+    record()
+    X_test_voice = extractFeature("input.wav", mfcc2=True)
+    print(X_test_voice)
+    X_test_voice = np.array([X_test_voice])
+    # model = SupportVectorMachine(C = 1,kernel = kernel)
+    # model.fit(X_train,y_train_new)
+    # ar = model.predict(X_test_voice)
+    # print("ar = ",ar)
 
 
-# X_train = np.array(X_train,dtype=np.float32)
-# y_train = np.array(y_train,dtype=np.float32)
-# X_test = np.array(X_test,dtype=np.float32)
-# y_test = np.array(y_test,dtype=np.float32)
+    # accuracy = accuracy_score(y_true=y_test_new, y_pred=ar)
 
-# print(len(y_train))
+    # print("Accuracy: {:.2f}%".format(accuracy*100))
 
-# # print some details
-# # number of samples in training data
-# print("[+] Number of training samples:", X_train.shape[0])
-# # number of samples in testing data
-# print("[+] Number of testing samples:", X_test.shape[0])
-# # number of features used
-# # this is a vector of features extracted 
-# # using extract_features() function
-# print("[+] Number of features:", X_train.shape[1])
+    # saved_model = pickle.dump(model, open("modelHappy.model", "wb"))
 
-from SVM import *
-model = KernelSvmClassifier(C = 1, kernel = GRBF)
-print("START FIT")
-model.fit(X_train,y_train_new)
-print("End FIT")
-y_pred = model.predict(X_test)
-print(y_pred)
-print(y_test_new)
-print("END PREDICT")
-
-# from mySVM import SupportVectorMachine
-# model2 = SupportVectorMachine(C=1, kernel="g")
-# a = model2.fit(X_train, y_train_new)
-
-
-accuracy = accuracy_score(y_true=y_test_new, y_pred=y_pred)
-
-print("Accuracy: {:.2f}%".format(accuracy*100))
+    
+    loaded_modelHappy = pickle.load(open("modelHappy.model",'rb'))
+    loaded_modelSad = pickle.load(open("modelSad.model",'rb'))
+    loaded_modelAngry = pickle.load(open("modelAngry.model",'rb'))
+    modelsArr = [loaded_modelHappy, loaded_modelSad, loaded_modelAngry]
+    lst_emotions = []
+    for i in range(3):
+        lst_emotions.append(modelsArr[i].predict(X_test_voice))
+    print(lst_emotions)
+    
+    max_index = lst_emotions.index(max(lst_emotions))
+    if max_index == 0:
+        print("happy")
+    elif max_index == 1:
+        print("sad")
+    elif max_index == 2:
+        print("angry")
+        
